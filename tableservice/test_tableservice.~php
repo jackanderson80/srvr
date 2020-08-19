@@ -1,0 +1,997 @@
+<?php
+    require_once __DIR__ . "/../common/db_common.php";
+    require_once __DIR__ . "/test_db_config.php";
+    require_once __DIR__ . "/tableservice.php";
+
+
+    // column operations
+    
+    // add and delete
+ 
+    // add column to empty table with no columns
+    // remove to leave zero column
+    // add column of each type
+    // and populate the table with a few records
+    // test deleting first column, last column and column in the middle
+    // remove all columns again
+
+    // repeat the test several times to ensure integrity is not broken
+
+    // change type
+
+    function createTestDB()
+    {
+        global $db_hostname, $db_username, $db_password, $db_port;
+		
+        return db_create($db_hostname, $db_username, $db_password, "new_db2", $db_port);
+    }
+
+    function connectTestDB()
+    {
+        global $db_hostname, $db_username, $db_password, $db_port;
+
+        $conn = db_connect($db_hostname, $db_username, $db_password, "new_db2", $db_port);
+        return $conn;
+    }
+
+    function deleteTestDB()
+    {
+        global $db_hostname, $db_username, $db_password, $db_port;
+
+        return db_delete($db_hostname, $db_username, $db_password, "new_db2", $db_port);
+    }
+
+    function printStatus($result)
+    {
+        if ($result == true)
+        {
+            echo "PASSED\n<br>";
+        }
+        else
+        {
+            echo "FAILED\n<br>";
+        }
+    }
+
+    function validateResult($result)
+    {
+        if ($result["status"] == true)
+        {
+            echo "PASSED\n<br>";
+        }
+        else
+        {
+            echo "FAILED: " . $result["error"] . "\n<br>";
+        }
+    }
+
+    function exitOnFail($result)
+    {
+        if ($result != true)
+            exit();
+    }
+
+    function runTableTest($connection, $testFunction)
+    {
+        $tableManager = new TableManager($connection);
+
+        echo "Creating test table for '" . $testFunction . "': ";
+
+        $result = $tableManager->createTable("table1",
+            array()
+        );
+
+        if ($result["status"] == false)
+        {
+            echo $result["error"] . "\n";
+            return false;
+        }
+        else
+        {
+            echo "Ok\n";
+        }
+
+        /////
+        $testResult = call_user_func_array($testFunction, array($tableManager));
+        /////
+
+        cleanup:
+
+        echo "Cleaning test table for '" . $testFunction . "': ";
+
+        $result = $tableManager->deleteTable();
+        if ($result["status"] == false)
+        {
+            echo $result["error"] . "\n";
+            return false;
+        }
+        else
+        {
+            echo "Ok\n";
+        }
+
+        return $testResult;
+    }
+
+    ////////////////////////////////////////////////////
+    // Tests
+
+    function testAddColumn($tableManager)
+    {
+        $typesAndValues = array(
+            'int' => 5,
+            'string' => "some string",
+            'double' => 12345.06789,
+            'number' => 12345.06789,
+            'datetime' => '2019-06-01 12:45:18',
+            'boolean' => false,
+            'option'=> 'choice 1',
+            'multioption'=> 'choice 1, choice 2, choice 3',
+            'link'=> 'www.google.com',
+            'filelink'=>'https://myserver/myfile.zip',
+            'imagelink'=> 'https://myserver/myfile.png',
+            'text'=> 'some very long test will go here' // up to 16MB
+        );
+
+        $rows = [];
+
+        $i = 0;
+        foreach($typesAndValues as $key => $value)
+        {
+            $i++;
+
+            $result = $tableManager->addColumn("col" . ($i - 1), $key, []);
+            if ($result["status"] == false)
+            {
+                echo $result["error"];
+                return false;                
+            }
+
+            $currentValue = [];
+            $j = 0;
+            foreach($typesAndValues as $key2 => $value2)
+            {
+                $colValue = array("name" => "col" . $j, "value" => $value2);
+                array_push($currentValue, $colValue);
+                $j++;
+
+                if ($j == $i)
+                    break;
+            }
+
+            echo "Adding new record: ";// . json_encode($currentValue) . ": ";
+            $result = $tableManager->addRecord($currentValue);
+            if ($result["status"] == false)
+            {
+                echo $result["error"];
+                return false;                
+            }
+
+            $uuid = $result["data"]["record_uuid"];
+
+            echo $uuid . "\n";
+            if (!$uuid)
+                return false;
+
+            array_push($rows, $uuid);
+        }
+
+        //$result = $tableManager->getRecords();
+
+        for ($i = 0; $i < count($typesAndValues); $i++)
+        {
+            echo "Validating record: " . $rows[$i] . ": ";
+
+            $result = $tableManager->getRecord($rows[$i]);
+
+            $j = 0;
+            foreach($typesAndValues as $key => $value)
+            {
+                $colName = "col" . $j;
+                if ($result["data"][$colName] != $value)
+                {
+                    echo "Invalid key value pair for record " . $rows[$i] . ", colName = " . $colName . ", value = " . $result["data"][$colName] . ", expect = " . $value . "\n";
+                    return false;
+                }
+
+                if ($j == $i)
+                    break;
+
+                $j++;
+            }
+
+            echo "Ok\n";
+        }
+
+        return true;        
+    }
+
+    function testRemoveColumn($tableManager)
+    {
+        $rows = [];
+
+        $colsCount = 10;
+
+        for ($i = 0; $i < $colsCount; $i++)
+        {
+            $result = $tableManager->addColumn("col" . $i, "number", []);
+            if ($result["status"] == false)
+            {
+                echo $result["error"];
+                return false;                
+            }
+        }
+
+        $currentValue = [];
+        for ($j = 0; $j < $colsCount; $j++)
+        {
+            $colValue = array("name" => "col" . $j, "value" => $j);
+            array_push($currentValue, $colValue);
+        }
+
+        echo "Adding new record: ";// . json_encode($currentValue) . ": ";
+        $result = $tableManager->addRecord($currentValue);
+        if ($result["status"] == false)
+        {
+            echo $result["error"];
+            return false;                
+        }
+
+        $uuid = $result["data"]["record_uuid"];
+
+        echo $uuid . "\n";
+        if (!$uuid)
+            return false;
+
+
+        // validate record before removing any columns
+        echo "Validating record: " . $uuid . ": ";
+
+        $result = $tableManager->getRecord($uuid);
+
+        for ($j = 0; $j < $colsCount; $j++)
+        {
+            $colName = "col" . $j;
+            if ($result["data"][$colName] != $j)
+            {
+                echo "Invalid key value pair for record " . $uuid . ", colName = " . $colName . ", value = " . $result["data"][$colName] . ", expect = " . $value . "\n";
+                return false;
+            }
+        }
+
+        echo "Ok\n";
+
+        $colsToDelete = [0, 9, 4, 5, 7, 1, 8, 6, 2];
+
+        for ($i = 0; $i < count($colsToDelete); $i++)
+        {
+            $colName = "col" . $colsToDelete[$i];
+
+            // get column index
+            $deleteIdx = -1;
+            for ($j = 0; $j < count($tableManager->table_schema); $j++)
+            {
+                if ($tableManager->table_schema[$j]["name"] == $colName)
+                {
+                    $deleteIdx = $j;
+                    break;
+                }
+            }
+
+            if ($deleteIdx == -1)
+            {
+                echo "Cannot find target delete column.";
+                return false;
+            }
+
+            echo "Removing column " . $colName . ":";
+            $result = $tableManager->deleteColumn($deleteIdx);
+            if ($result["status"] == false)
+            {
+                echo $result["error"] . "\n";
+                return false;
+            }
+
+            echo "Ok\n";
+
+            // validate record after removing column 0
+            echo "Validating record: " . $uuid . ": ";
+
+            $result = $tableManager->getRecord($uuid);
+
+            $deletedCols = [];
+            for ($k = 0; $k <= $i; $k++)
+                array_push($deletedCols, $colsToDelete[$k]);
+
+            for ($j = 0; $j < $colsCount; $j++)
+            {
+                $colName = "col" . $j;
+                $isDeleted = false;
+
+                for ($k = 0; $k < count($deletedCols); $k++)
+                    if ($j == $deletedCols[$k])
+                    {
+                        $isDeleted = true;
+                        break;
+                    }
+
+                if ($isDeleted)
+                {
+                    if (!isset($result["data"][$colName]))
+                        continue;
+                    else
+                    {
+                        echo "error: col" . $j . " must be deleted but is still present\n";
+                        return false;
+                    }
+                }
+
+                if ($result["data"][$colName] != $j)
+                {
+                    echo "Invalid key value pair for record " . $uuid . ", colName = " . $colName . ", value = " . $result["data"][$colName] . ", expect = " . $value . "\n";
+                    return false;
+                }
+            }     
+
+            echo "Ok\n";
+
+        }
+
+        return true;        
+    }
+
+    function testSetColumnPosition($tableManager)
+    {
+        $typesAndValues = array(
+            'int' => 5,
+            'string' => "some string",
+            'number' => 12345.06789,
+            'double' => 12345.06789,
+            'datetime' => '2019-06-01 12:45:18',
+            'boolean' => false,
+            'option'=> 'choice 1',
+            'multioption'=> 'choice 1, choice 2, choice 3',
+            'link'=> 'www.google.com',
+            'filelink'=>'https://myserver/myfile.zip',
+            'imagelink'=> 'https://myserver/myfile.png',
+            'text'=> 'some very long test will go here' // up to 16MB
+        );
+
+        $rows = [];
+        $colNames = [];
+
+        $i = 0;
+        foreach($typesAndValues as $key => $value)
+        {
+            array_push($colNames, "col" . $i);
+            $i++;
+
+            $result = $tableManager->addColumn("col" . ($i - 1), $key, []);
+            if ($result["status"] == false)
+            {
+                echo $result["error"];
+                return false;                
+            }
+        }
+
+        $currentValue = [];
+        $i = 0;
+        foreach($typesAndValues as $key2 => $value2)
+        {
+            $colValue = array("name" => "col" . $i, "value" => $value2);
+            array_push($currentValue, $colValue);
+            $i++;
+        }
+
+        echo "Adding new record: ";
+        $result = $tableManager->addRecord($currentValue);
+        if ($result["status"] == false)
+        {
+            echo $result["error"];
+            return false;                
+        }
+
+        $uuid = $result["data"]["record_uuid"];
+
+        echo $uuid . "\n";
+        if (!$uuid)
+            return false;
+
+        echo "Validating the record: ";
+        $result = $tableManager->getRecord($uuid);
+        if ($result["status"] == false)
+        {
+            echo $result["error"];
+            return false;                
+        }
+
+        $j = 0;
+        foreach($typesAndValues as $key => $value)
+        {
+            $colName = "col" . $j;
+            if ($result["data"][$colName] != $value)
+            {
+                echo "Invalid key value pair for record " . $rows[$i] . ", colName = " . $colName . ", value = " . $result["data"][$colName] . ", expect = " . $value . "\n";
+                return false;
+            }
+
+            $j++;
+        }
+        echo "Ok\n";
+
+        $swaps = [0,9,1,2,3,8,4,0,8,2,5,6];
+        
+        for ($i = 0; $i < count($swaps); $i += 2)
+        {
+            $idx1 = $swaps[$i];
+            $idx2 = $swaps[$i + 1];
+
+            echo "Moving column from position " . $idx1 . " to position " . $idx2  . ": ";
+
+            $name1 = $colNames[$idx1];
+            array_splice($colNames, $idx1, 1);
+            array_splice($colNames, $idx2, 0, "placeholder");
+            $colNames[$idx2] = $name1;
+
+            $result = $tableManager->setColumnPosition($idx1, $idx2);
+            if ($result["status"] == false)
+            {
+                echo $result["error"] . "\n";
+                return false;
+            }
+            echo "Ok\n";
+
+            echo "Validating column positions and data values after move: ";
+            // validate
+            $result = $tableManager->getRecord($uuid);
+            if ($result["status"] == false)
+            {
+                echo $result["error"] . "\n";
+                return false;
+            }
+
+            $data = $result['data'];
+
+            // validate positions
+            $j = 0;
+            foreach($data as $key => $value)
+            {
+                if ($j > 0)
+                {
+                    if ($key != $colNames[$j - 1])
+                    {
+                        echo "Invalid column position for " . $colName[$j - 1] . "\n";
+                        return false;
+                    }
+                }
+
+                $j++;
+            }
+
+            if ($j != count($colNames) + 1)
+            {
+                echo "Invalid columns count\n";
+                return false;
+            }
+
+            // validate content
+            $j = 0;
+            foreach($typesAndValues as $key => $value)
+            {
+                $colName = "col" . $j;
+                if ($result["data"][$colName] != $value)
+                {
+                    echo "Invalid key value pair for record " . $rows[$i] . ", colName = " . $colName . ", value = " . $data[$colName] . ", expect = " . $value . "\n";
+                    return false;
+                }
+
+                $j++;
+            }
+
+            echo "Ok\n";
+        }
+
+        return true;        
+    }
+
+    function testChangeColumnType($tableManager)
+    {
+        $typesAndValues = array(
+            'int' => 5,
+            'string' => "some string",
+            'double' => 12345.06789,
+            'datetime' => '2019-06-01 12:45:18',
+            'boolean' => true,
+            'option'=> '123',
+            'multioption'=> 'o1, o2, o3',
+            'link'=> '0',
+            'filelink'=>'l1',
+            'imagelink'=> 'i1',
+            'text'=> '2019-06-01' // up to 16MB
+        );
+
+        $rows = [];
+        $colNames = [];
+
+        $i = 0;
+        foreach($typesAndValues as $key => $value)
+        {
+            array_push($colNames, "col" . $i);
+            $i++;
+
+            $result = $tableManager->addColumn("col" . ($i - 1), $key, []);
+            if ($result["status"] == false)
+            {
+                echo $result["error"];
+                return false;                
+            }
+        }
+
+        $recordValue = [];
+        $i = 0;
+        foreach($typesAndValues as $key2 => $value2)
+        {
+            $colValue = array("name" => "col" . $i, "value" => $value2);
+            array_push($recordValue, $colValue);
+            $i++;
+        }
+
+        echo "Adding new record: ";
+        $result = $tableManager->addRecord($recordValue);
+        if ($result["status"] == false)
+        {
+            echo $result["error"];
+            return false;                
+        }
+
+        $uuid = $result["data"]["record_uuid"];
+
+        echo $uuid . "\n";
+        if (!$uuid)
+            return false;
+
+        echo "Validating the record: ";
+        $result = $tableManager->getRecord($uuid);
+        if ($result["status"] == false)
+        {
+            echo $result["error"];
+            return false;                
+        }
+
+        $j = 0;
+        foreach($typesAndValues as $key => $value)
+        {
+            $colName = "col" . $j;
+            if ($result["data"][$colName] != $value)
+            {
+                echo "Invalid key value pair for record " . $rows[$i] . ", colName = " . $colName . ", value = " . $result["data"][$colName] . ", expect = " . $value . "\n";
+                return false;
+            }
+
+            $j++;
+        }
+        echo "Ok\n";
+
+        /*
+        'int' => 5,
+        'string' => "some string",
+        'double' => 12345.06789,
+        'datetime' => '2019-06-01 12:45:18',
+        'boolean' => true,
+        'option'=> '123',
+        'multioption'=> 'o1, o2, o3',
+        'link'=> '0',
+        'filelink'=>'l1',
+        'imagelink'=> 'i1',
+        'text'=> '2019-06-01' // up to 16MB
+        */
+        $conversionsMatrixValues = array(
+            'int' => array('double' => array(true, 5), 'int' => array(true, 5), 'string' => array(true, '5'), 'datetime' => array(false, 5), 'boolean' => array(false, 5), 'option' => array(true, '5'), 'multioption' => array(true, '5'), 'link' => array(true, '5'), 'filelink' => array(true, '5'), 'imagelink' => array(true, '5'), 'text' => array(true, '5')),
+            'string' => array('double' => array(false, 'some string'), 'int' => array(false, 'some string'), 'string' => array(true, 'some string'), 'datetime' => array(false, 'some string'), 'boolean' => array(false, 'some string'), 'option' => array(true, 'some string'), 'multioption' => array(true, 'some string'), 'link' => array(true, 'some string'), 'filelink' => array(true, 'some string'), 'imagelink' => array(true, 'some string'), 'text' => array(true, 'some string')),
+            'double' => array('double' => array(true, 12345.06789), 'int' => array(true, 12345), 'string' => array(true, '12345.06789'), 'datetime' => array(false, 12345.06789), 'boolean' =>  array(false, 12345.06789), 'option' =>  array(true, '12345.06789'), 'multioption' => array(true, '12345.06789'), 'link' => array(true, '12345.06789'), 'filelink' => array(true, '12345.06789'), 'imagelink' => array(true, '12345.06789'), 'text' => array(true, '12345.06789')),
+            'datetime' => array('double' => array(true, 20190601124518), 'int' => array(false, '2019-06-01 12:45:18'), 'string' => array(true, '2019-06-01 12:45:18'), 'datetime' => array(true, '2019-06-01 12:45:18'), 'boolean' => array(false, '2019-06-01 12:45:18'), 'option' => array(true, '2019-06-01 12:45:18'), 'multioption' => array(true, '2019-06-01 12:45:18'), 'link' => array(true, '2019-06-01 12:45:18'), 'filelink' => array(true, '2019-06-01 12:45:18'), 'imagelink' => array(true, '2019-06-01 12:45:18'), 'text' => array(true, '2019-06-01 12:45:18')),
+            'boolean' => array('double' => array(true, 1), 'int' => array(true, 1), 'string' => array(true, '1'), 'datetime' => array(false, '1'), 'boolean' => array(true, true), 'option' => array(true, '1'), 'multioption' => array(true, ''), 'link' => array(true, '1'), 'filelink' => array(true, '1'), 'imagelink' => array(true, '1'), 'text' => array(true, '')),
+            // the option's value is 123 so it should convert to int and double
+            'option'=> array('double' => array(true, 123), 'int' => array(true, 123), 'string' => array(true, '123'), 'datetime' => array(false, '123'), 'boolean' => array(false, '123'), 'option' => array(true, '123'), 'multioption' => array(true, '123'), 'link' => array(true, '123'), 'filelink' => array(true, '123'), 'imagelink' => array(true, '123'), 'text' => array(true, '123')),
+            'multioption'=> array('double' => array(false, 'o1, o2, o3'), 'int' => array(false, 'o1, o2, o3'), 'string' => array(true, 'o1, o2, o3'), 'datetime' => array(false, 'o1, o2, o3'), 'boolean' => array(true, 0), 'option' => array(true, 'o1, o2, o3'), 'multioption' => array(true, 'o1, o2, o3'), 'link' => array(true, 'o1, o2, o3'), 'filelink' => array(true, 'o1, o2, o3'), 'imagelink' => array(true, 'o1, o2, o3'), 'text' => array(true, 'o1, o2, o3')),
+            // the link value is 0 so it should convert to double, int, string, boolean and others
+            'link' => array('double' => array(true, 0), 'int' => array(true, 0), 'string' => array(true, '0'), 'datetime' => array(false, '0'), 'boolean' => array(true, '0'), 'option' => array(true, '0'), 'multioption' => array(true, '0'), 'link' => array(true, '0'), 'filelink' => array(true, '0'), 'imagelink' => array(true, '0'), 'text' => array(true, '0')),
+            'filelink' => array('double' => array(false, 'l1'), 'int' => array(false, 'l1'), 'string' => array(true, 'l1'), 'datetime' => array(false, 'l1'), 'boolean' => array(false, 'l1'), 'option' => array(true, 'l1'), 'multioption' => array(true, 'l1'), 'link' => array(true, 'l1'), 'filelink' => array(true, 'l1'), 'imagelink' => array(true, 'l1'), 'text' => array(true, 'l1')),
+            'imagelink' => array('double' => array(false, 'i1'), 'int' => array(false, 'i1'), 'string' => array(true, 'i1'), 'datetime' => array(false, 'i1'), 'boolean' => array(false, 'i1'), 'option' => array(true, 'i1'), 'multioption' => array(true, 'i1'), 'link' => array(true, 'i1'), 'filelink' => array(true, 'i1'), 'imagelink' => array(true, 'i1'), 'text' => array(true, 'i1')),
+            // the text's value is a date so it should convert to datetime
+            'text' => array('double' => array(false, '2019-06-01'), 'int' => array(false, '2019-06-01'), 'string' => array(true, '2019-06-01'), 'datetime' => array(true, '2019-06-01 00:00:00'), 'boolean' => array(false, '2019-06-01'), 'option' => array(true, '2019-06-01'), 'multioption' => array(true, '2019-06-01'), 'link' => array(true, '2019-06-01'), 'filelink' => array(true, '2019-06-01'), 'imagelink' => array(true, '2019-06-01'), 'text' => array(true, '2019-06-01'))
+        );
+        
+        $columnIndex = 0;
+        foreach($conversionsMatrixValues as $type => $conversions)
+        {
+            foreach($conversions as $newType => $expectedConversionResult)
+            {
+                echo "Converting column " . $columnIndex . " from " . $type . " to " . $newType . ", expected result " . ($expectedConversionResult[0] == true ? "true" : "false") . ", post-conversion-value: " . $expectedConversionResult[1] . " : ";
+                $result = $tableManager->changeColumnType($columnIndex, $newType);
+                if ($result['status'] != $expectedConversionResult[0])
+                {
+                    echo "Wrong conversion status\n";
+                    return false;
+                }
+
+                $resultRecord = $tableManager->getRecord($uuid);
+                if ($resultRecord["status"] == false)
+                {
+                    echo $resultRecord["error"];
+
+                    return false;                
+                }
+
+                // check the value
+                if ($resultRecord['data']['col' . $columnIndex] != $expectedConversionResult[1])
+                {
+                    echo "Failed. Invalid value after conversion\n";
+                    return false;   
+                }
+
+                echo "Ok\n";
+
+                // restore the original column type
+                $result = $tableManager->changeColumnType($columnIndex, $type);
+                if ($result["status"] == false)
+                {
+                    echo $result["error"];
+                    return false;                
+                }
+
+                // restore the original value 
+                $result = $tableManager->updateRecord($uuid, $recordValue);
+                if ($result["status"] == false)
+                {
+                    echo $result["error"];
+                    return false;                
+                }
+        
+            }
+
+            $columnIndex++;
+        }
+
+        return true;        
+    }
+
+    function testTableCRUD($connection)
+    {
+        $tableManager = new TableManager($connection);
+        
+        echo "Table tests: \n";
+
+        // create table
+        echo "Creating table with 2 columns: ";
+
+        $schema = array(
+            array("name" => "col1", "type" => "number"),
+            array("name" => "col2", "type" => "string")
+        );
+
+        $result = $tableManager->createTable("table1", $schema);
+
+        if ($result['status'] == false)
+        {
+            echo $result["error"] . "\n";
+        }
+        else
+        {
+            echo "Ok\n";
+        }
+
+        $table_uuid = $result['data']['uuid'];
+
+        echo "Loading table " . $table_uuid . ": ";
+        $tableManager = new TableManager($connection);
+        $result = $tableManager->loadTable($table_uuid);
+        if ($result['status'] == false)
+        {
+            echo $result["error"] . "\n";
+        }
+        else
+        {
+            echo "Ok\n";
+        }
+
+        echo "Validating schema after load: ";
+        $result = $tableManager->getTableSchema();
+        if ($result['status'] == false)
+        {
+            echo $result["error"] . "\n";
+            return false;
+        }
+
+        $loadedSchema = $result['data']['table_schema'];
+
+        if (count($loadedSchema) != count($schema))
+        {
+            echo "Failed due to columns count mismatch\n";
+            return false;
+        }
+        
+        for ($i = 0; $i < count($loadedSchema); $i++)
+        {
+            if (
+                $loadedSchema[$i]["name"] != $schema[$i]["name"] || 
+                $loadedSchema[$i]["type"] != $schema[$i]["type"]
+            )
+            {
+                echo "Failed due to mismatch in column " . $i . "\n";
+                return false;
+            }
+        }
+        
+        echo "Ok\n";
+
+
+        // test delete table
+        echo "Test Table delete: ";
+        $result = $tableManager->deleteTable();
+        if ($result['status'] == false)
+        {
+            echo $result["error"] . "\n";
+        }
+        else
+        {
+            echo "Ok\n";
+        }
+
+
+        return true;
+    }
+
+    function testRecordsCRUD($tableManager)
+    {
+        $typesAndValues = array(
+            'int' => 5,
+            'string' => "some string",
+            'double' => 12345.06789,
+            'number' => 12345.06789,
+            'datetime' => '2019-06-01 12:45:18',
+            'boolean' => true,
+            'option'=> '123',
+            'multioption'=> 'o1, o2, o3',
+            'link'=> '0',
+            'filelink'=>'l1',
+            'imagelink'=> 'i1',
+            'text'=> '2019-06-01' // up to 16MB
+        );
+
+        $rows = [];
+
+        $i = 0;
+        foreach($typesAndValues as $key => $value)
+        {
+            $result = $tableManager->addColumn("col" . $i, $key, []);
+            if ($result["status"] == false)
+            {
+                echo $result["error"];
+                return false;                
+            }
+            $i++;
+        }
+
+        $rowsValues = [];
+
+        for ($i = 0; $i < 100; $i++)
+        {
+            $recordValue = [];
+            $j = 0;
+            foreach($typesAndValues as $key2 => $value2)
+            {
+                $colValue = array("name" => "col" . $j, "value" => $value2);
+                array_push($recordValue, $colValue);
+                $j++;
+            }
+
+            $recordValue[0]["value"] = $i;
+            $recordValue[1]["value"] = "string value" . $i;
+
+            echo "Adding new record " . $i . ": ";
+            $result = $tableManager->addRecord($recordValue);
+            if ($result["status"] == false)
+            {
+                echo $result["error"] . "\n";
+                return false;                
+            }
+
+            $uuid = $result["data"]["record_uuid"];
+            echo $uuid . "\n";
+
+            array_push($rows, $uuid);
+            array_push($rowsValues, $recordValue);
+        }
+
+        // delete all even records
+        for ($i = 0; $i < 100; $i += 2)
+        {
+            echo "Deleting record " . $rows[$i] . ": ";
+            $result = $tableManager->deleteRecord($rows[$i]);
+            if ($result["status"] == false)
+            {
+                echo $result["error"] . "\n"; 
+                return false;                
+            }
+            else
+            {
+                echo "Ok\n";
+            }
+        }
+
+        $result = $tableManager->getRecords();
+        if ($result["status"] == false)
+        {
+            echo $result["error"] . "\n"; 
+            return false;                
+        }
+
+        $records = $result['data'];
+        echo 'Validating remaining records: ';
+        for ($i = 0; $i < 50; $i++)
+        {
+            $k = $i * 2 + 1;
+            if (
+                $records[$i]["uuid"] == $rows[$k] &&
+                $records[$i]["col0"] == $k &&
+                $records[$i]["col1"] == "string value" . $k
+            )
+            {
+                continue;
+            }
+            else
+            {
+                echo "Failed. Mismatch for record " . $i * 2 . "\n";
+            }
+        }
+
+        echo "Ok\n";
+
+        echo 'Updating the records values';
+        for ($i = 0; $i < 50; $i++)
+        {
+
+            echo "Updating record " . $rows[$k] . ": ";
+            $k = $i * 2 + 1;
+            $rowsValues[$k][0]["value"] = $k * 2;
+            $rowsValues[$k][1]["value"] = "string value" . ($k * 2);
+            $result = $tableManager->updateRecord($rows[$k], $rowsValues[$k]);
+            if ($result["status"] == false)
+            {
+                echo $result["error"] . "\n"; 
+                return false;                
+            }
+            else
+            {
+                echo "Ok\n";
+            }
+        }
+
+        $result = $tableManager->getRecords();
+        if ($result["status"] == false)
+        {
+            echo $result["error"] . "\n"; 
+            return false;                
+        }
+
+        $records = $result['data'];
+        echo 'Validating updated records: ';
+        for ($i = 0; $i < 50; $i++)
+        {
+            $k = $i * 2 + 1;
+            if (
+                $records[$i]["uuid"] == $rows[$k] &&
+                $records[$i]["col0"] == $rowsValues[$k][0]["value"] &&
+                $records[$i]["col1"] == $rowsValues[$k][1]["value"]
+            )
+            {
+                continue;
+            }
+            else
+            {
+                echo "Failed. Mismatch for record " . $i * 2 . "\n";
+            }
+        }
+
+        echo "Ok\n";
+
+        
+        
+        return true;
+    }
+
+
+
+    function test()
+    {   
+        // delete the db to cleanup previous runs
+        echo "Cleanup from previous runs\n";
+        deleteTestDB();
+
+        echo "Test create DB: ";
+        $result = createTestDB();
+        printStatus($result);
+        exitOnFail($result);
+
+        echo "Connecting to DB: ";
+        $connection = connectTestDB();
+        if ($connection == null)
+        {
+            echo "Failed to connect\n";
+            exit();
+        }
+        else
+        {
+            echo "Connected\n";
+        }
+
+        echo "Test delete DB: ";
+        $result = deleteTestDB();
+        printStatus($result);
+        exitOnFail($result);
+
+        // create the db again to test the rest
+        echo "Test create db: ";
+        $result = createTestDB();
+        printStatus($result);
+        exitOnFail($result);
+
+        echo "Connecting to DB: ";
+        $connection = connectTestDB();
+        if ($connection == null)
+        {
+            echo "Failed to connect\n";
+            exit();
+        }
+        else
+        {
+            echo "Connected\n";
+        }
+
+        // test tables crud
+        $result = testTableCRUD($connection);
+        printStatus($result);
+        exitOnFail($result);
+       
+        // test records crud
+        $result = runTableTest($connection, 'testRecordsCRUD');
+        printStatus($result);
+        exitOnFail($result);
+
+        /////////////////////////////////
+        // column operations
+        // test set column change type
+        $result = runTableTest($connection, 'testChangeColumnType');
+        printStatus($result);
+        exitOnFail($result);
+
+
+        $result = runTableTest($connection, 'testAddColumn');
+
+        printStatus($result);
+        exitOnFail($result);
+
+
+        // test remove column
+        $result = runTableTest($connection, 'testRemoveColumn');
+        printStatus($result);
+        exitOnFail($result);
+        
+        // test set column position
+        $result = runTableTest($connection, 'testSetColumnPosition');
+        printStatus($result);
+        exitOnFail($result); 
+    
+
+        /////////////////////////////////
+        /////////////////////////////////
+        echo "Cleanup. Deleting DB: ";
+        $result = deleteTestDB();
+        printStatus($result);
+
+        exit();
+    }
+
+    test();
+?>

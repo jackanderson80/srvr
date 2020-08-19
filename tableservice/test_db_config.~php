@@ -1,0 +1,6 @@
+<?php
+    $db_hostname = "p:localhost";
+    $db_port = 3306;
+    $db_username = "jqwpuser";
+    $db_password = "Parola@0302";
+?>

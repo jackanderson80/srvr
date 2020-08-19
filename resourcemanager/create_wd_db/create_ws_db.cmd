@@ -1,0 +1,2 @@
+"c:\Program Files\MySQL\MySQL Server 5.7\bin\mysqladmin" --user=root --password=Parola0302 create %1
+"c:\Program Files\MySQL\MySQL Server 5.7\bin\mysql" --user=root --password=Parola0302 %1 < ws_db_template_20190902.sql

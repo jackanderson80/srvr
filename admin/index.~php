@@ -1,0 +1,9 @@
+<?php
+require_once __DIR__ . "/../config/app_config.php";
+require_once __DIR__ . "/../config/db_config.php";
+require_once __DIR__ . "/../db_utils/mysql_restore.php";
+
+echo "Welcome";
+
+
+?>

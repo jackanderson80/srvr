@@ -1,0 +1,105 @@
+<?php
+    require_once __DIR__ . "/../common/common.php";
+    require_once __DIR__ . "/../common/db_common.php";
+    require_once __DIR__ . "/../config/db_config.php";
+    require_once __DIR__ . "/resourcemanager.php";
+
+    function connect_RM_DB()
+    {
+        global $rm_db_hostname, $rm_db_username, $rm_db_password, $rm_db_database, $rm_db_port;
+
+        $conn = db_connect($rm_db_hostname, $rm_db_username, $rm_db_password, $rm_db_database, $rm_db_port);
+        return $conn;
+    }
+
+    function printStatus($result)
+    {
+        if ($result == true)
+        {
+            echo "PASSED\n";
+        }
+        else
+        {
+            echo "FAILED\n";
+        }
+    }
+
+    function validateResult($result)
+    {
+        if ($result["status"] == true)
+        {
+            echo "PASSED\n";
+        }
+        else
+        {
+            echo "FAILED: " . $result["error"] . "\n";
+        }
+    }
+
+    function exitOnFail($result)
+    {
+        if ($result != true)
+            exit();
+    }
+
+    function test()
+    {   
+        echo "Connecting to RM DB: ";
+        $connection = connect_RM_DB();
+        if ($connection == null)
+        {
+            echo "Failed to connect\n";
+            exit();
+        }
+        else
+        {
+            echo "Connected\n";
+        }
+
+        $resourceManager = new ResourceManager($connection);
+
+//      $resourceManager->findFreeTenant("ws-community");
+//      return;
+
+        echo "Test add node: ";
+        $args = array("cmd" => "addNode", "params" => array("node name", "http://localhost", "{'user': 'foo', 'password': 'bar'}", 2048, 16384));
+        $result = invoke_fn($resourceManager, json_encode($args));
+//        $result = $resourceManager->addNode("node name", "http://localhost", "{'user': 'foo', 'password': 'bar'}", 2048, 16384);
+        validateResult($result);
+        exitOnFail($result["status"]);
+
+        $node_uuid = $result["data"]["uuid"];
+
+        echo "Find free node for the tenant: ";
+        $result = $resourceManager->findNode("my_tenant_type");
+        validateResult($result);
+        exitOnFail($result["status"]);
+        $node_uuid = $result["data"]["node_uuid"];
+
+        echo "Test add tenant: ";
+        
+        $tenant_uuid = guid();
+        $result = $resourceManager->registerTenant($tenant_uuid, $node_uuid, "my_tenant_type");
+        validateResult($result);
+        exitOnFail($result["status"]);
+        
+        echo "Test delete node. Should fail because we have a tenant: ";
+        $result = $resourceManager->deleteNode($node_uuid);
+        printStatus($result["status"] == false);
+
+
+        echo "Test delete tenant: ";
+        $result = $resourceManager->deleteTenant($tenant_uuid);
+        printStatus($result["status"] == true && $result["data"]["deleted_count"] == 1);
+        exitOnFail($result["status"]);
+
+        echo "Test delete node: ";
+        $result = $resourceManager->deleteNode($node_uuid);
+        printStatus($result["status"] == true && $result["data"]["deleted_count"] == 1);
+        exitOnFail($result["status"]);
+
+        exit();
+    }
+
+    test();
+?>

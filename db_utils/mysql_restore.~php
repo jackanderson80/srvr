@@ -1,0 +1,148 @@
+<?php
+
+require_once __DIR__ . "/../common/common.php";
+require_once __DIR__ . "/../common/db_common.php";
+
+function append_substr(&$list, $s)
+{
+	if (strlen($s) > 0)
+	{
+		array_push($list, $s);
+	}
+}
+
+function parse_mysql_dump($str)
+{
+	$list = [];
+	
+	$delimiter_1 = "DELIMITER ;";
+	$delimiter_2 = "DELIMITER ;;";
+
+	$current_delimiter = ";";
+
+	$i = 0;
+	$substr = "";
+	while ($i < strlen($str))
+	{
+		if (substr_compare($str, $delimiter_2, $i, strlen($delimiter_2)) == 0)
+		{
+			$current_delimiter = ";;";
+			$i += strlen($delimiter_2);
+			append_substr($list, $substr);
+			$substr = "";
+			continue;
+		}
+		
+		if (substr_compare($str, $delimiter_1, $i, strlen($delimiter_1)) == 0)
+		{
+			$current_delimiter = ";";
+			$i += strlen($delimiter_1);
+			
+			append_substr($list, $substr);
+			$substr = "";
+			continue;
+		}
+			
+		if (substr_compare($str, $current_delimiter, $i, strlen($current_delimiter)) == 0)
+		{
+			append_substr($list, $substr);
+			$substr = "";
+			$i += strlen($current_delimiter);
+			continue;
+		}
+		
+		$substr = $substr . $str[$i];
+		
+		$i++;
+	}
+	
+	return $list;
+}
+
+function restore_mysql_dump($file_name, $host_name, $user_name, $password, $database_name, $use_existing_database = false)
+{
+	set_error_handler('generic_error_handler');
+
+	$error = "";
+	$status = true;
+	$data = "";
+
+	try
+	{
+		if (!$use_existing_database)
+		{
+			$mysqli = db_connect($host_name, $user_name, $password, $database_name);
+			if ($mysqli != null)
+			{
+				$mysqli->close();
+				unset($mysqli);
+				
+				$status = false;
+				$error = "Database '" . $database_name . "' already exists";
+				goto end;
+			}
+
+			$inner_result = db_create($host_name, $user_name, $password, $database_name);
+
+			if ($inner_result['status'] == false)
+			{
+				$status = false;
+				$error = $inner_result['error'];
+				goto end;
+			}
+		}
+	
+		$content = file_get_contents($file_name);
+
+		$statements = parse_mysql_dump($content);
+
+		$mysqli = db_connect($host_name, $user_name, $password, $database_name);
+		if ($mysqli == null)
+		{
+			$status = false;
+			$error = "Cannot connect to MySql database '" . $database_name . "'";
+			goto end;
+		}
+	
+		for ($i = 0; $i < count($statements); $i++)
+		{
+			$sqlQuery = $statements[$i];
+			
+			if (strlen(trim($sqlQuery)) == 0)
+			{
+				continue;
+			}
+
+			if ($mysqli->query($sqlQuery) !== true)
+			{
+				$error = "Failed to execute query";
+				$status = false;
+
+				$mysqli->close();
+				unset($mysqli);
+				break;
+			}
+		}
+
+		if ($i == count($statements))
+			$mysqli->close();
+	}
+	catch(Exception $e)
+	{
+		$status = false;
+		$error = $e;
+	}
+
+	end:
+	
+	$out = array('data' => "", 'status' => $status, 'error' => $error);
+
+	return $out;
+	
+}
+
+//$output = restore_mysql_dump("../resourcemanager/create_wd_db/wd_db_template_20190902.sql", "p:localhost", "root", "Parola0302", "test_restore_db");
+//var_dump($output);
+
+
+?>
